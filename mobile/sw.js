@@ -1,4 +1,4 @@
-const CACHE = "margin-sentences-v162";
+const CACHE = "margin-sentences-v163";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
