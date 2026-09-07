@@ -40,7 +40,7 @@ const db = {
 };
 
 let model = { sentences: [], annotations: [], entries: [], links: [], collections: [], settings: [], wordInsights: [] };
-let ui = { screen: "reading", collectionId: null, wordbookCollectionId: null, wordbookReturn: "reading", wordbookType: "all", wordbookSort: "recent", wordbookMode: "read", wordbookShowOriginal: true, wordbookShowNotes: true, wordsLibraryOpen: false, wordsLibraryTab: "reading", wordsLibraryType: "all", wordCollectionId: "words-all", wordsMode: "read", wordBulkEditing: false, wordBulkSelection: [], wordExampleDisplay: "one", wordShowPhrases: true, wordShowSynonyms: true, sentenceId: null, entryId: null, entryTab: "examples", entryEditing: false, entryEditingTargetId: "", entryDrafts: {}, entryNewExampleCount: 0, entryInsightTargetId: "", entryInsightDrafts: {}, entryInsightNewCounts: {}, entrySynonymExampleCounts: {}, entrySynonymDrafts: {}, entryNewSynonymCount: 0, search: "", sort: "recent", sentenceSort: "recent", allCollectionSort: "recent", annotationSort: "recent", showAnnotations: true, showNotes: true, showAnnotationDetails: true, showSentenceNotes: true, showCollectionNames: true, bulkEditing: false, bulkSelection: [], sheet: null, selection: null, tokenSelection: [], appendAnnotationId: "", toast: "" };
+let ui = { screen: "reading", collectionId: null, wordbookCollectionId: null, wordbookReturn: "reading", wordbookType: "all", wordbookSort: "recent", wordbookMode: "read", wordbookShowOriginal: true, wordbookShowNotes: true, wordsLibraryOpen: false, wordsLibraryTab: "reading", wordsLibraryType: "all", wordCollectionId: "words-all", wordsMode: "read", wordBulkEditing: false, wordBulkSelection: [], wordExampleDisplay: "one", wordShowPhrases: true, wordShowSynonyms: true, collectionMode: "read", sentenceId: null, entryId: null, entryTab: "examples", entryEditing: false, entryEditingTargetId: "", entryDrafts: {}, entryNewExampleCount: 0, entryInsightTargetId: "", entryInsightDrafts: {}, entryInsightNewCounts: {}, entrySynonymExampleCounts: {}, entrySynonymDrafts: {}, entryNewSynonymCount: 0, search: "", sort: "recent", sentenceSort: "recent", allCollectionSort: "recent", annotationSort: "recent", showAnnotations: true, showNotes: true, showAnnotationDetails: true, showSentenceNotes: true, showCollectionNames: true, bulkEditing: false, bulkSelection: [], sheet: null, selection: null, tokenSelection: [], appendAnnotationId: "", toast: "" };
 let toastTimer;
 
 async function load() {
@@ -229,14 +229,19 @@ function header(title, backAction = "", rightControl = "") {
   return `<header class="topbar">${backAction ? `<button class="icon-button" data-action="${backAction}" aria-label="Back">‹</button>` : `<span class="brand-dot"></span>`}<div><h1>${escapeHTML(title)}</h1></div>${right}</header>`;
 }
 
+function supportsCollectionReadingMode(collection) {
+  return collection?.name.trim() === "哈利波特";
+}
+
 function renderSentenceRow(sentence, compact = false) {
-  const bulk = ui.bulkEditing && ui.collectionId && !ui.sentenceId && (collectionFor(ui.collectionId)?.isAll || sentence.collectionId === ui.collectionId);
+  const activeCollection = collectionFor(ui.collectionId);
+  const collectionReading = supportsCollectionReadingMode(activeCollection) && ui.collectionMode === "read";
+  const bulk = !collectionReading && ui.bulkEditing && ui.collectionId && !ui.sentenceId && (activeCollection?.isAll || sentence.collectionId === ui.collectionId);
   const selected = bulk && ui.bulkSelection.includes(sentence.id);
   const notes = sortedAnnotations(annotationsForSentence(sentence.id).filter((annotation) => annotation.type !== "target" && ui.showAnnotationDetails && (rememberedText(annotation) !== annotation.selectedText || annotation.note))).map((annotation) => `<div class="annotation-summary ${annotation.type}"><span class="annotation-pill ${annotation.type}">${ANNOTATION_TYPES[annotation.type]}</span><strong>${escapeHTML(rememberedText(annotation))}</strong>${annotation.note ? `<p>${escapeHTML(annotation.note)}</p>` : ""}</div>`).join("");
   const sentenceNote = ui.showSentenceNotes && sentence.note ? `<div class="annotation-summary sentence-note-summary"><p>${escapeHTML(sentence.note)}</p></div>` : "";
-  const collectionName = collectionFor(ui.collectionId)?.isAll && ui.showCollectionNames ? `<div class="sentence-collection-name">${escapeHTML(collectionFor(sentence.collectionId)?.name || "未分类")}</div>` : "";
-  const readOnly = collectionFor(ui.collectionId)?.isAll;
-  const row = readOnly ? `<div class="sentence-row read-only ${compact ? "compact" : ""}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></div>` : `<button class="sentence-row ${compact ? "compact" : ""}" data-action="${bulk ? "toggle-bulk-sentence" : "open-sentence"}" data-id="${sentence.id}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>`;
+  const collectionName = activeCollection?.isAll && ui.showCollectionNames ? `<div class="sentence-collection-name">${escapeHTML(collectionFor(sentence.collectionId)?.name || "未分类")}</div>` : "";
+  const row = activeCollection?.isAll ? `<div class="sentence-row read-only ${compact ? "compact" : ""}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></div>` : collectionReading ? `<button class="sentence-row reading-mode-row ${compact ? "compact" : ""}" data-action="speak-sentence" data-id="${sentence.id}" data-term="${escapeHTML(sentence.text)}" aria-label="朗读例句"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>` : `<button class="sentence-row ${compact ? "compact" : ""}" data-action="${bulk ? "toggle-bulk-sentence" : "open-sentence"}" data-id="${sentence.id}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>`;
   return `<article class="sentence-item ${bulk ? "bulk-mode" : ""} ${selected ? "selected" : ""}">${row}${collectionName}${notes || sentenceNote ? `<div class="annotation-summary-list">${notes}${sentenceNote}</div>` : ""}</article>`;
 }
 
@@ -280,9 +285,12 @@ function renderCollection() {
   if (!collection) { ui.collectionId = null; return renderReading(); }
   const children = collection.isAll ? [] : childrenFor(collection.id);
   const sentences = collection.isAll ? readingSentences() : readingSentences().filter((item) => item.collectionId === collection.id);
+  const hasReadingModePreview = supportsCollectionReadingMode(collection);
+  const isCollectionReading = hasReadingModePreview && ui.collectionMode === "read";
   const allSelected = sentences.length > 0 && sentences.every((sentence) => ui.bulkSelection.includes(sentence.id));
   const bulkBar = !collection.isAll && ui.bulkEditing ? `<div class="bulk-edit-bar"><button class="bulk-select-all ${allSelected ? "active" : ""}" data-action="toggle-bulk-all">${allSelected ? "取消全选" : "全选"}</button><span>已选 ${ui.bulkSelection.length}</span><button data-action="bulk-move-selected">移动</button><button data-action="bulk-delete-selected">删除</button><button data-action="cancel-bulk">取消</button></div>` : "";
-  const actionButtons = `<button class="text-action" data-action="open-wordbook" data-id="${collection.id}">单词本</button><button class="text-action add-sentence" data-action="save-sentence">＋ 新增</button>${collection.isAll ? "" : `<button class="text-action ${ui.bulkEditing ? "active" : ""}" data-action="toggle-bulk">批量</button>`}`;
+  const modeButton = hasReadingModePreview ? `<button class="text-action ${ui.collectionMode === "edit" ? "mode-active" : ""}" data-action="toggle-collection-mode" aria-label="切换到${ui.collectionMode === "edit" ? "阅读" : "编辑"}模式">${ui.collectionMode === "edit" ? "编辑" : "阅读"}</button>` : "";
+  const actionButtons = `<button class="text-action" data-action="open-wordbook" data-id="${collection.id}">单词本</button><button class="text-action add-sentence" data-action="save-sentence">＋ 新增</button>${modeButton}${collection.isAll || isCollectionReading ? "" : `<button class="text-action ${ui.bulkEditing ? "active" : ""}" data-action="toggle-bulk">批量</button>`}`;
   const orderedSentences = collection.isAll && ui.allCollectionSort === "collection" ? allCollectionSorted(sentences) : sorted(sentences, "createdAt", collection.isAll ? ui.allCollectionSort : ui.sentenceSort);
   return `${header(collection.name, "back-reading", `<button class="icon-button" data-action="collection-menu" data-id="${collection.id}" aria-label="Collection menu">•••</button>`)}<section class="page-content collection-page"><div class="collection-actions"><div class="collection-action-buttons">${actionButtons}</div>${renderSentenceControls(true)}</div>${bulkBar}${children.length ? `<section class="collection-list small">${children.map(renderCollectionCard).join("")}</section>` : ""}${sentences.length ? `<div class="sentence-list">${orderedSentences.map((sentence) => renderSentenceRow(sentence)).join("")}</div>` : empty("Start this collection with one real sentence.", "save-sentence", "Add a sentence")}</section>`;
 }
@@ -896,6 +904,7 @@ document.addEventListener("click", async (event) => {
   if (action === "settings") { ui.sheet = { kind: "settings" }; render(); }
   if (action === "toggle-words-mode") { ui.wordsMode = ui.wordsMode === "edit" ? "read" : "edit"; render(); }
   if (action === "toggle-wordbook-mode") { ui.wordbookMode = ui.wordbookMode === "edit" ? "read" : "edit"; render(); }
+  if (action === "toggle-collection-mode") { ui.collectionMode = ui.collectionMode === "edit" ? "read" : "edit"; ui.bulkEditing = false; ui.bulkSelection = []; render(); }
   if (action === "toggle-word-bulk") { ui.wordBulkEditing = !ui.wordBulkEditing; ui.wordBulkSelection = []; render(); }
   if (action === "cancel-word-bulk") { ui.wordBulkEditing = false; ui.wordBulkSelection = []; render(); }
   if (action === "save-sentence") { ui.sheet = { kind: "sentence", collectionId: collectionFor(ui.collectionId)?.isAll ? (defaultCollection()?.id || "") : (ui.collectionId || ""), entryId: "" }; render(); }
@@ -943,7 +952,7 @@ document.addEventListener("click", async (event) => {
   if (action === "new-child-collection") { ui.sheet = { kind: "collection", parentId: recordId }; render(); }
   if (action === "collection-menu") { ui.sheet = { kind: "collection-menu", collectionId: recordId }; render(); }
   if (action === "rename-collection") { ui.sheet = { kind: "rename-collection", collectionId: recordId }; render(); }
-  if (action === "open-collection") { ui.collectionId = recordId; ui.wordbookCollectionId = null; ui.bulkEditing = false; ui.bulkSelection = []; ui.search = ""; render(); }
+  if (action === "open-collection") { ui.collectionId = recordId; ui.wordbookCollectionId = null; ui.collectionMode = "read"; ui.bulkEditing = false; ui.bulkSelection = []; ui.search = ""; render(); }
   if (action === "open-wordbook") { ui.wordbookReturn = "reading"; ui.wordbookCollectionId = recordId; ui.wordbookType = "all"; render(); }
   if (action === "back-wordbook") { const returnToWords = ui.wordbookReturn === "words"; ui.wordbookCollectionId = null; ui.wordbookReturn = "reading"; if (returnToWords) { ui.screen = "words"; ui.wordsLibraryOpen = true; } render(); }
   if (action === "back-reading") { ui.collectionId = null; ui.wordbookCollectionId = null; ui.bulkEditing = false; ui.bulkSelection = []; ui.search = ""; render(); }
@@ -951,6 +960,7 @@ document.addEventListener("click", async (event) => {
   if (action === "back-from-sentence") { const sentence = sentenceFor(ui.sentenceId); ui.sentenceId = null; ui.selection = null; ui.tokenSelection = []; ui.appendAnnotationId = ""; if (ui.screen === "reading" && sentence?.collectionId) ui.collectionId = sentence.collectionId; render(); }
   if (action === "speak-entry") { speak(target.dataset.term || ""); }
   if (action === "speak-wordbook") { speak(target.dataset.term || ""); }
+  if (action === "speak-sentence") { speak(target.dataset.term || sentenceFor(recordId)?.text || ""); }
   if (action === "open-entry") { ui.entryId = recordId; ui.entryTab = "examples"; ui.entryEditing = false; ui.entryEditingTargetId = ""; ui.entryInsightTargetId = ""; ui.entryDrafts = {}; ui.entryNewExampleCount = 0; ui.entryInsightDrafts = {}; ui.entryInsightNewCounts = {}; ui.entrySynonymExampleCounts = {}; ui.entrySynonymDrafts = {}; ui.entryNewSynonymCount = 0; ui.tokenSelection = []; ui.sentenceId = null; ui.sheet = null; ui.screen = "words"; render(); }
   if (action === "back-words") { ui.entryId = null; ui.search = ""; render(); }
   if (action === "entry-toggle-edit") { ui.entryEditing = !ui.entryEditing; ui.entryEditingTargetId = ""; ui.entryInsightTargetId = ""; ui.entryDrafts = {}; ui.entryNewExampleCount = 0; ui.entryInsightDrafts = {}; ui.entryInsightNewCounts = {}; ui.entrySynonymExampleCounts = {}; ui.entrySynonymDrafts = {}; ui.entryNewSynonymCount = 0; ui.tokenSelection = []; render(); }
