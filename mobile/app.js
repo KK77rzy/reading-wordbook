@@ -739,12 +739,14 @@ async function saveEntryExamples(entry, sentences) {
     const selected = tokenSelectionFor(synthetic);
     if (changed || selected) await saveEntryTarget(entry, updatedSentence, link, selected);
   }
-  const newText = entryDraftText(entry, "new", "").trim().replace(/\s+/g, " ");
-  if (newText) {
+  for (let index = 0; index < (ui.entryNewExampleCount || 0); index += 1) {
+    const draftId = `new-${index}`;
+    const newText = entryDraftText(entry, draftId, "").trim().replace(/\s+/g, " ");
+    if (!newText) continue;
     const sentence = { id: id("sentence"), text: newText, note: "", sourceLabel: "", collectionId: "", createdVia: "wordExample", createdAt: now(), updatedAt: now() };
     await db.put("sentences", sentence);
     const link = { id: id("link"), entryId: entry.id, sentenceId: sentence.id, anchorAnnotationId: "", createdAt: now() };
-    const selected = tokenSelectionFor({ id: `entry-draft-${entry.id}-new`, text: newText });
+    const selected = tokenSelectionFor({ id: `entry-draft-${entry.id}-${draftId}`, text: newText });
     if (selected) link.anchorAnnotationId = await saveEntryTarget(entry, sentence, link, selected);
     await db.put("links", link);
   }
