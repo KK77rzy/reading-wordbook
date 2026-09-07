@@ -149,6 +149,7 @@ button { cursor: pointer; border: 0; }
 .entry-insight-copy mark.annotation { color: inherit !important; background: transparent !important; font-weight: 400 !important; }
 .entry-insight-copy mark.annotation.target { color: #454a45 !important; font-weight: 700 !important; }
 .entry-insight-copy em { margin-left: 6px; color: #8d9790; font-size: 11px; font-style: normal; }
+.entry-insight-group.synonyms .entry-insight-copy em { display: block; margin-left: 0; }
 .entry-insight-copy small { display: block; margin-top: 3px; color: #8d9790; font-size: 11px; }
 .entry-row i { grid-row: 1 / span 2; grid-column: 3; color: #aaaea7; font-size: 20px; font-style: normal; }
 .speak-mini { width: 31px; height: 31px; color: #557262; border-radius: 50%; font-size: 19px; }
