@@ -230,7 +230,7 @@ function header(title, backAction = "", rightControl = "") {
 }
 
 function supportsCollectionReadingMode(collection) {
-  return collection?.name.trim() === "哈利波特";
+  return Boolean(collection);
 }
 
 function renderSentenceRow(sentence, compact = false) {
@@ -241,7 +241,7 @@ function renderSentenceRow(sentence, compact = false) {
   const notes = sortedAnnotations(annotationsForSentence(sentence.id).filter((annotation) => annotation.type !== "target" && ui.showAnnotationDetails && (rememberedText(annotation) !== annotation.selectedText || annotation.note))).map((annotation) => `<div class="annotation-summary ${annotation.type}"><span class="annotation-pill ${annotation.type}">${ANNOTATION_TYPES[annotation.type]}</span><strong>${escapeHTML(rememberedText(annotation))}</strong>${annotation.note ? `<p>${escapeHTML(annotation.note)}</p>` : ""}</div>`).join("");
   const sentenceNote = ui.showSentenceNotes && sentence.note ? `<div class="annotation-summary sentence-note-summary"><p>${escapeHTML(sentence.note)}</p></div>` : "";
   const collectionName = activeCollection?.isAll && ui.showCollectionNames ? `<div class="sentence-collection-name">${escapeHTML(collectionFor(sentence.collectionId)?.name || "未分类")}</div>` : "";
-  const row = activeCollection?.isAll ? `<div class="sentence-row read-only ${compact ? "compact" : ""}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></div>` : collectionReading ? `<button class="sentence-row reading-mode-row ${compact ? "compact" : ""}" data-action="speak-sentence" data-id="${sentence.id}" data-term="${escapeHTML(sentence.text)}" aria-label="朗读例句"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>` : `<button class="sentence-row ${compact ? "compact" : ""}" data-action="${bulk ? "toggle-bulk-sentence" : "open-sentence"}" data-id="${sentence.id}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>`;
+  const row = collectionReading ? `<button class="sentence-row reading-mode-row ${compact ? "compact" : ""}" data-action="speak-sentence" data-id="${sentence.id}" data-term="${escapeHTML(sentence.text)}" aria-label="朗读例句"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>` : `<button class="sentence-row ${compact ? "compact" : ""}" data-action="${bulk ? "toggle-bulk-sentence" : "open-sentence"}" data-id="${sentence.id}"><p>${sentenceMarkup(sentence, { interactive: false, visible: ui.showAnnotations })}</p></button>`;
   return `<article class="sentence-item ${bulk ? "bulk-mode" : ""} ${selected ? "selected" : ""}">${row}${collectionName}${notes || sentenceNote ? `<div class="annotation-summary-list">${notes}${sentenceNote}</div>` : ""}</article>`;
 }
 
