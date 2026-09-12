@@ -2,6 +2,9 @@ const DB_NAME = "margin-sentences";
 const DB_VERSION = 2;
 const STORES = ["sentences", "annotations", "entries", "links", "collections", "settings", "wordInsights"];
 const READING_WORD_COLLECTION_ID = "words-reading";
+const SUPABASE_URL = "https://nyopubvcctqyilpqdxaw.supabase.co";
+const SUPABASE_KEY = "sb_publishable_8S4Tkq1w5WVLM2iBpsyUPA_1OBFmoQn";
+const CLOUD_SESSION_KEY = "margin-cloud-session";
 const ANNOTATION_TYPES = { target: "词条", word: "生词", phrase: "短语", context: "语境", pattern: "句式", grammar: "语法" };
 const ENTRY_TYPES = { word: "Word", phrase: "Phrase", pattern: "Pattern", other: "Other" };
 
@@ -41,7 +44,50 @@ const db = {
 
 let model = { sentences: [], annotations: [], entries: [], links: [], collections: [], settings: [], wordInsights: [] };
 let ui = { screen: "reading", collectionId: null, wordbookCollectionId: null, wordbookReturn: "reading", wordbookType: "all", wordbookSort: "recent", wordbookMode: "read", wordbookShowOriginal: true, wordbookShowNotes: true, wordsLibraryOpen: false, wordsLibraryTab: "reading", wordsLibraryType: "all", wordCollectionId: "words-all", wordsMode: "read", wordBulkEditing: false, wordBulkSelection: [], wordExampleDisplay: "one", wordShowPhrases: true, wordShowSynonyms: true, collectionMode: "read", sentenceId: null, entryId: null, entryTab: "examples", entryEditing: false, entryEditingTargetId: "", entryDrafts: {}, entryNewExampleCount: 0, entryInsightTargetId: "", entryInsightDrafts: {}, entryInsightNewCounts: {}, entrySynonymExampleCounts: {}, entrySynonymDrafts: {}, entryNewSynonymCount: 0, search: "", sort: "recent", sentenceSort: "recent", allCollectionSort: "recent", annotationSort: "recent", showAnnotations: true, showNotes: true, showAnnotationDetails: true, showSentenceNotes: true, showCollectionNames: true, bulkEditing: false, bulkSelection: [], sheet: null, selection: null, tokenSelection: [], appendAnnotationId: "", toast: "" };
+let cloudState = { session: null, busy: false };
 let toastTimer;
+
+function restoreCloudSession() {
+  try { cloudState.session = JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY) || "null"); } catch (_) { cloudState.session = null; }
+}
+
+function setCloudSession(session) {
+  cloudState.session = session || null;
+  if (session) localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
+  else localStorage.removeItem(CLOUD_SESSION_KEY);
+}
+
+function cloudUser() { return cloudState.session?.user || null; }
+
+async function cloudAccessToken() {
+  const session = cloudState.session;
+  if (!session) return "";
+  if (session.expires_at && session.expires_at * 1000 > Date.now() + 60000) return session.access_token;
+  if (!session.refresh_token) return session.access_token || "";
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: session.refresh_token }) });
+  if (!response.ok) { setCloudSession(null); return ""; }
+  const next = await response.json();
+  setCloudSession({ ...next, expires_at: Math.floor(Date.now() / 1000) + (next.expires_in || 3600) });
+  return next.access_token || "";
+}
+
+async function cloudAuthRequest(path, body) {
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error_description || data.msg || data.message || "云端登录失败");
+  return data;
+}
+
+async function cloudRest(path, options = {}) {
+  const token = await cloudAccessToken();
+  if (!token) throw new Error("请先登录云端");
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(options.headers || {}) } });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || data.details || "云端请求失败");
+  }
+  return response.status === 204 ? null : response.json().catch(() => null);
+}
 
 async function load() {
   const values = await Promise.all(STORES.map((store) => db.all(store)));
@@ -591,7 +637,11 @@ function renderSheet() {
     const canonicalValue = annotation?.entryText && annotation.entryText !== annotation.selectedText ? annotation.entryText : "";
     return `<div class="scrim" data-action="close-sheet"></div><section class="sheet form-sheet annotation-sheet"><header><div class="annotation-title"><span class="annotation-pill ${annotation?.type}">${ANNOTATION_TYPES[annotation?.type]}</span><h2>${escapeHTML(rememberedText(annotation || {}) || "Annotation")}</h2></div><button data-action="close-sheet">×</button></header><form id="annotation-form" data-id="${annotation?.id || ""}"><label>Base form <input name="entryText" value="${escapeHTML(canonicalValue)}" placeholder="headsets → headset / yelling at us → yell at sb" /></label><label>Note <textarea name="note" placeholder="Optional · a small reminder">${escapeHTML(annotation?.note || "")}</textarea></label><button class="primary-button" type="submit">Save</button></form>${libraryStatus}<button class="sheet-danger" data-action="delete-annotation" data-id="${annotation?.id || ""}">Delete annotation</button></section>`;
   }
-  if (sheet.kind === "settings") return `<div class="scrim" data-action="close-sheet"></div><section class="sheet settings-sheet"><header><h2>数据</h2><button data-action="close-sheet">×</button></header><p>学习数据仅保存在当前浏览器中，除非你手动导出备份。</p><button class="sheet-link" data-action="export-backup">导出备份</button><button class="sheet-link" data-action="import-backup">导入备份</button><p class="small-copy">建议定期导出到“文件”或 iCloud Drive。清除 Safari 网站数据会删除本地数据。</p></section>`;
+  if (sheet.kind === "settings") {
+    const user = cloudUser();
+    const cloudBlock = user ? `<div class="cloud-account"><strong>云端已登录</strong><span>${escapeHTML(user.email || "")}</span></div><button class="sheet-link" data-action="cloud-sync" ${cloudState.busy ? "disabled" : ""}>${cloudState.busy ? "同步中…" : "立即同步"}</button><button class="sheet-link" data-action="cloud-upload" ${cloudState.busy ? "disabled" : ""}>上传本机备份</button><button class="sheet-link" data-action="cloud-download" ${cloudState.busy ? "disabled" : ""}>从云端恢复</button><button class="sheet-link cloud-logout" data-action="cloud-logout">退出云端登录</button>` : `<p class="cloud-intro">登录后可把单词、句子和笔记保存到云端。</p><form id="cloud-auth-form" class="cloud-auth-form"><label>邮箱 <input type="email" name="email" required autocomplete="email" placeholder="you@example.com" /></label><label>密码 <input type="password" name="password" required minlength="6" autocomplete="current-password" placeholder="至少 6 位" /></label><div class="cloud-auth-actions"><button class="sheet-link" type="submit" data-cloud-auth="signin">登录云端</button><button class="sheet-link" type="submit" data-cloud-auth="signup">注册账号</button></div></form>`;
+    return `<div class="scrim" data-action="close-sheet"></div><section class="sheet settings-sheet"><header><h2>数据</h2><button data-action="close-sheet">×</button></header><p>本机数据会保存在当前浏览器中；登录云端后，还可以跨设备同步。</p><h3 class="settings-subtitle">云端同步</h3>${cloudBlock}<h3 class="settings-subtitle">本地备份</h3><button class="sheet-link" data-action="export-backup">导出文件备份</button><button class="sheet-link" data-action="import-backup">导入文件备份</button><p class="small-copy">云端同步不会替代本地备份；重要数据仍建议偶尔导出文件。</p></section>`;
+  }
   return "";
 }
 
@@ -879,6 +929,74 @@ function speak(term) {
 }
 
 function backupPayload() { return { format: "margin-sentences", version: 1, exportedAt: new Date().toISOString(), ...model }; }
+function validBackupPayload(payload) { return payload?.format === "margin-sentences" && STORES.every((store) => Array.isArray(payload[store])); }
+
+function mergeCloudPayload(local, remote) {
+  const merged = { ...local, format: "margin-sentences", version: 1, exportedAt: new Date().toISOString() };
+  STORES.forEach((store) => {
+    const records = new Map();
+    [...(remote?.[store] || []), ...(local?.[store] || [])].forEach((record) => {
+      if (!record?.id) return;
+      const existing = records.get(record.id);
+      const recordTime = record.updatedAt || record.createdAt || 0;
+      const existingTime = existing?.updatedAt || existing?.createdAt || 0;
+      if (!existing || recordTime >= existingTime) records.set(record.id, record);
+    });
+    merged[store] = [...records.values()];
+  });
+  return merged;
+}
+
+async function cloudBackupPayload() {
+  const user = cloudUser();
+  if (!user) throw new Error("请先登录云端");
+  const rows = await cloudRest(`user_backups?select=payload,updated_at&user_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+  return rows?.[0] || null;
+}
+
+async function cloudUpload(payload = backupPayload()) {
+  const user = cloudUser();
+  if (!user) throw new Error("请先登录云端");
+  await cloudRest("user_backups?on_conflict=user_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ user_id: user.id, payload, updated_at: new Date().toISOString() }) });
+}
+
+async function cloudSync() {
+  const remote = await cloudBackupPayload();
+  const local = backupPayload();
+  const payload = remote?.payload && validBackupPayload(remote.payload) ? mergeCloudPayload(local, remote.payload) : local;
+  await db.replaceAll(payload);
+  await cloudUpload(payload);
+  await load();
+}
+
+async function cloudDownload() {
+  const remote = await cloudBackupPayload();
+  if (!remote?.payload || !validBackupPayload(remote.payload)) throw new Error("云端还没有可恢复的备份");
+  if (!window.confirm("从云端恢复会覆盖当前手机数据，确定继续吗？")) return false;
+  await db.replaceAll(remote.payload);
+  await load();
+  return true;
+}
+
+async function handleCloudError(error) {
+  cloudState.busy = false;
+  render();
+  flash(error?.message || "云端操作失败");
+}
+
+async function cloudSignIn(form, signUp = false) {
+  const email = form.email.value.trim();
+  const password = form.password.value;
+  if (!email || password.length < 6) return flash("请输入邮箱和至少 6 位密码");
+  cloudState.busy = true; render();
+  try {
+    const data = await cloudAuthRequest(signUp ? "signup" : "token?grant_type=password", { email, password });
+    if (!data.access_token) { cloudState.busy = false; render(); return flash(signUp ? "注册成功，请查收确认邮件后登录" : "登录未完成，请确认邮箱"); }
+    setCloudSession({ ...data, expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 3600) });
+    cloudState.busy = false; render(); flash("云端登录成功");
+  } catch (error) { await handleCloudError(error); }
+}
+
 function exportBackup() {
   const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob); const link = document.createElement("a");
@@ -888,7 +1006,7 @@ function exportBackup() {
 async function importBackup(file) {
   try {
     const payload = JSON.parse(await file.text());
-    if (payload.format !== "margin-sentences" || !STORES.every((store) => Array.isArray(payload[store]))) throw new Error("invalid-backup");
+    if (!validBackupPayload(payload)) throw new Error("invalid-backup");
     await db.replaceAll(payload); ui = { ...ui, screen: "reading", collectionId: null, wordbookCollectionId: null, sentenceId: null, entryId: null, bulkEditing: false, bulkSelection: [], sheet: null, selection: null, tokenSelection: [], appendAnnotationId: "" }; await load(); flash("Backup restored");
   } catch (_) { flash("This is not a Margin backup"); }
 }
@@ -902,6 +1020,23 @@ document.addEventListener("click", async (event) => {
   if (action === "quick-add") { ui.sheet = { kind: "quick" }; render(); }
   if (action === "close-sheet" || action === "clear-selection") { ui.sheet = null; ui.selection = null; ui.tokenSelection = []; ui.appendAnnotationId = ""; window.getSelection()?.removeAllRanges(); render(); }
   if (action === "settings") { ui.sheet = { kind: "settings" }; render(); }
+  if (action === "cloud-logout") { setCloudSession(null); render(); flash("已退出云端"); }
+  if (action === "cloud-sync") {
+    cloudState.busy = true; render();
+    try { await cloudSync(); cloudState.busy = false; render(); flash("云端同步完成"); } catch (error) { await handleCloudError(error); }
+  }
+  if (action === "cloud-upload") {
+    cloudState.busy = true; render();
+    try {
+      const remote = await cloudBackupPayload();
+      if (remote && !window.confirm("上传本机备份会覆盖云端当前备份，确定继续吗？")) { cloudState.busy = false; render(); return; }
+      await cloudUpload(); cloudState.busy = false; render(); flash("本机备份已上传");
+    } catch (error) { await handleCloudError(error); }
+  }
+  if (action === "cloud-download") {
+    cloudState.busy = true; render();
+    try { const restored = await cloudDownload(); cloudState.busy = false; render(); if (restored) flash("云端数据已恢复"); } catch (error) { await handleCloudError(error); }
+  }
   if (action === "toggle-words-mode") { ui.wordsMode = ui.wordsMode === "edit" ? "read" : "edit"; render(); }
   if (action === "toggle-wordbook-mode") { ui.wordbookMode = ui.wordbookMode === "edit" ? "read" : "edit"; render(); }
   if (action === "toggle-collection-mode") { ui.collectionMode = ui.collectionMode === "edit" ? "read" : "edit"; ui.bulkEditing = false; ui.bulkSelection = []; render(); }
@@ -1133,6 +1268,7 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (event.target.id === "cloud-auth-form") { await cloudSignIn(event.target, event.submitter?.dataset.cloudAuth === "signup"); return; }
   if (event.target.id === "sentence-form") await saveSentence(event.target);
   if (event.target.id === "collection-from-sentence-form") {
     const name = event.target.name.value.trim();
@@ -1184,4 +1320,5 @@ document.addEventListener("change", (event) => {
 document.getElementById("backup-file").addEventListener("change", async (event) => { const file = event.target.files?.[0]; if (file) await importBackup(file); event.target.value = ""; });
 
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+restoreCloudSession();
 load().catch(() => { document.getElementById("app").innerHTML = `<div class="fatal">Margin needs browser storage to save your sentences.</div>`; });
